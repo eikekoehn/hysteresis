@@ -10,7 +10,6 @@ import xarray as xr
 import dask
 
 
-
 def calc_hysteresis_area_1D(ref_axis, data_series, nsteps=1000, normalizer='min_max_diff_full_cycle',return_interpolated_vectors = False):
     """
     Calculate the hysteresis area between ramp-up and ramp-down curves.
@@ -68,7 +67,7 @@ def calc_hysteresis_area_1D(ref_axis, data_series, nsteps=1000, normalizer='min_
     # Compute absolute difference and area
     difference = np.abs(interpolated_rampup - interpolated_rampdown)
     hysteresis_area = np.nansum(difference * stepwidth)
-    
+
     # Compute signed hysteresis area (mean of ramp-down minus mean of ramp-up)
     signed_hysteresis_area = np.nanmean(interpolated_rampdown) - np.nanmean(interpolated_rampup)
     
