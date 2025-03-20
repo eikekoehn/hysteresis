@@ -95,12 +95,6 @@ def calc_hysteresis_area_1D(ref_axis, data_series, nsteps=1000, normalizer='min_
 
 
 
-
-
-
-
-
-
 def calc_hysteresis_area_3D(ref_axis, da, nsteps=1000, normalizer='min_max_diff_full_cycle', return_interpolated_vectors=False):
     """
     Compute hysteresis at multiple locations in a 3D xarray DataArray.
@@ -119,35 +113,35 @@ def calc_hysteresis_area_3D(ref_axis, da, nsteps=1000, normalizer='min_max_diff_
 
     def hysteresis_wrapper(data_series):
         """Wrapper to apply calc_hysteresis_area_1D on 1D data."""
-        if np.all(np.isnan(data_series)):  # Skip if all NaN
-            return np.NaN, np.NaN, np.NaN, np.NaN  # Keep shape consistency
-        return calc_hysteresis_area_1D(ref_axis, data_series, nsteps, normalizer, return_interpolated_vectors)[:4]  # Ensure only four outputs
+        if np.any(np.isnan(data_series)):  # Skip if any NaN
+            return np.NaN, np.NaN, np.NaN, np.NaN  # Ensure correct shape
+        return calc_hysteresis_area_1D(ref_axis, data_series, nsteps, normalizer, return_interpolated_vectors)[:4]
 
     # Apply function across lat/lon using vectorized approach
-    result = xr.apply_ufunc(
+    results = xr.apply_ufunc(
         hysteresis_wrapper, da,
-        input_core_dims=[["year"]],  # Apply along 'year' axis for each lat/lon
-        output_core_dims=[[],[],[],[]],  # Output is scalar per lat/lon
-        vectorize=True,  # Apply element-wise across lat/lon
-        dask="parallelized",  # Enable parallelization (if using dask)
+        input_core_dims=[["year"]],  # Apply along 'year' axis
+        output_core_dims=[[], [], [], []],  # Each output is a scalar per lat/lon
+        vectorize=True,  # Automatically loops over lat/lon
+        dask="parallelized",  # Enables parallelization
         output_dtypes=[float, float, float, float]  # Ensure correct output types
     )
 
-    # The result is a tuple of scalars for each (lat, lon), so reshape the result to match (lat, lon)
-    hysteresis_area = xr.DataArray(result[0], dims=("lat", "lon"), coords={"lat": da.lat, "lon": da.lon})
-    signed_hysteresis_area = xr.DataArray(result[1], dims=("lat", "lon"), coords={"lat": da.lat, "lon": da.lon})
-    normalized_hysteresis_area = xr.DataArray(result[2], dims=("lat", "lon"), coords={"lat": da.lat, "lon": da.lon})
-    normalizer_value = xr.DataArray(result[3], dims=("lat", "lon"), coords={"lat": da.lat, "lon": da.lon})
-
-    # Return results as an xarray dataset
-    return xr.Dataset(
+    # Ensure results retain (lat, lon) structure
+    dataset = xr.Dataset(
         {
-            "hysteresis_area": hysteresis_area,
-            "signed_hysteresis_area": signed_hysteresis_area,
-            "normalized_hysteresis_area": normalized_hysteresis_area,
-            "normalizer_value": normalizer_value
-        }
+            "hysteresis_area": (["lat", "lon"], results[0].data),
+            "signed_hysteresis_area": (["lat", "lon"], results[1].data),
+            "normalized_hysteresis_area": (["lat", "lon"], results[2].data),
+            "normalizer_value": (["lat", "lon"], results[3].data)
+        },
+        coords={"lat": da.lat, "lon": da.lon}
     )
+
+    return dataset
+
+
+
 
 #def calc_hysteresis_area_3D(ref_axis,da,nsteps=1000,normalizer='min_max_diff_rampup'):
 #    nlat = da.lat.size
