@@ -10,7 +10,7 @@ import xarray as xr
 import dask
 
 
-def calc_hysteresis_area_1D(ref_axis, data_series, nsteps=1000, normalizer='min_max_diff_full_cycle',return_interpolated_vectors = False):
+def calc_hysteresis_area_1D(ref_axis, data_series, nsteps=1000, normalizer='min_max_diff_full_cycle', return_interpolated_vectors = False):
     """
     Calculate the hysteresis area between ramp-up and ramp-down curves.
     
