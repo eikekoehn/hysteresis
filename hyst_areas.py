@@ -61,8 +61,8 @@ def calc_hysteresis_area_1D(ref_axis, data_series, nsteps=1000, normalizer='min_
         return np.NaN, np.NaN, np.NaN, np.NaN
 
     # Interpolate data for ramp-up and ramp-down
-    interpolated_rampup = np.interp(ramping_vector, rampup_ref_axis, rampup_data_series)
-    interpolated_rampdown = np.interp(ramping_vector, rampdown_ref_axis, rampdown_data_series)
+    interpolated_rampup = np.interp(ramping_vector, rampup_ref_axis, rampup_data_series,left=np.NaN,right=np.NaN)
+    interpolated_rampdown = np.interp(ramping_vector, rampdown_ref_axis, rampdown_data_series,left=np.NaN,right=np.NaN)
     
     # Compute absolute difference and area
     difference = np.abs(interpolated_rampup - interpolated_rampdown)
@@ -139,23 +139,3 @@ def calc_hysteresis_area_3D(ref_axis, da, nsteps=1000, normalizer='min_max_diff_
     )
 
     return dataset
-
-
-
-
-#def calc_hysteresis_area_3D(ref_axis,da,nsteps=1000,normalizer='min_max_diff_rampup'):
-#    nlat = da.lat.size
-#    nlon = da.lon.size
-#    all_hysteresis_areas = np.zeros((nlat,nlon))+np.NaN
-#    all_signed_hysteresis_areas = np.zeros((nlat,nlon))+np.NaN
-#    all_normalized_hysteresis_areas = np.zeros((nlat,nlon))+np.NaN
-#    all_normalizers = np.zeros((nlat,nlon))+np.NaN
-#
-#    for ila,nla in enumerate(da.lat.values):
-#        if np.mod(ila,20)==0:
-#            print(f'{ila}/180')
-#        for ilo,nlo in enumerate(da.lon.values):
-#            data_series_dummy = da.isel(lat=ila,lon=ilo).values
-#            data_series = Spliner.fspline1D(data_series_dummy)
-#            all_hysteresis_areas[ila,ilo], all_signed_hysteresis_areas[ila,ilo], all_normalized_hysteresis_areas[ila,ilo], all_normalizers[ila,ilo] = calc_hysteresis_area_1D(ref_axis,data_series,nsteps,normalizer)
-#    return all_hysteresis_areas, all_signed_hysteresis_areas, all_normalized_hysteresis_areas, all_normalizers
