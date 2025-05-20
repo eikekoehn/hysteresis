@@ -87,7 +87,7 @@ def calc_hysteresis_area_1D(ref_axis, data_series, nsteps=1000, normalizer='min_
     else:
         warnings.warn("Normalization factor is zero; normalized hysteresis area will be NaN.", RuntimeWarning)
         normalized_hysteresis_area = np.NaN
-    
+
     if return_interpolated_vectors == True:
         return hysteresis_area, signed_hysteresis_area, normalized_hysteresis_area, normalizer_value, interpolated_rampup, interpolated_rampdown, ramping_vector
     else:
@@ -112,30 +112,73 @@ def calc_hysteresis_area_3D(ref_axis, da, nsteps=1000, normalizer='min_max_diff_
     """
 
     def hysteresis_wrapper(data_series):
-        """Wrapper to apply calc_hysteresis_area_1D on 1D data."""
-        if np.any(np.isnan(data_series)):  # Skip if any NaN
-            return np.NaN, np.NaN, np.NaN, np.NaN  # Ensure correct shape
-        return calc_hysteresis_area_1D(ref_axis, data_series, nsteps, normalizer, return_interpolated_vectors)[:4]
 
-    # Apply function across lat/lon using vectorized approach
-    results = xr.apply_ufunc(
-        hysteresis_wrapper, da,
-        input_core_dims=[["year"]],  # Apply along 'year' axis
-        output_core_dims=[[], [], [], []],  # Each output is a scalar per lat/lon
-        vectorize=True,  # Automatically loops over lat/lon
-        dask="parallelized",  # Enables parallelization
-        output_dtypes=[float, float, float, float]  # Ensure correct output types
-    )
+        # Proceed with calculation
+        result = calc_hysteresis_area_1D(
+            ref_axis,
+            data_series,
+            nsteps=nsteps,
+            normalizer=normalizer,
+            return_interpolated_vectors=return_interpolated_vectors
+        )
 
-    # Ensure results retain (lat, lon) structure
-    dataset = xr.Dataset(
-        {
-            "hysteresis_area": (["lat", "lon"], results[0].data),
-            "signed_hysteresis_area": (["lat", "lon"], results[1].data),
-            "normalized_hysteresis_area": (["lat", "lon"], results[2].data),
-            "normalizer_value": (["lat", "lon"], results[3].data)
-        },
-        coords={"lat": da.lat, "lon": da.lon}
-    )
+        # Fallback in case of unexpected result structure
+        if return_interpolated_vectors:
+           if len(result) != 7:
+               nan_vector = np.full(nsteps, np.nan)
+               return np.NaN, np.NaN, np.NaN, np.NaN, nan_vector, nan_vector, nan_vector
+        else:
+           if len(result) != 4:
+               return np.NaN, np.NaN, np.NaN, np.NaN
+        
+        return result
+
+    if return_interpolated_vectors==False:
+        # Apply function across lat/lon using vectorized approach
+        results = xr.apply_ufunc(
+            hysteresis_wrapper, da,
+            input_core_dims=[["year"]],  # Apply along 'year' axis
+            output_core_dims=[[], [], [], []],  # Each output is a scalar per lat/lon
+            vectorize=True,  # Automatically loops over lat/lon
+            dask="parallelized",  # Enables parallelization
+            output_dtypes=[float, float, float, float]  # Ensure correct output types
+        )
+
+        # Ensure results retain (lat, lon) structure
+        dataset = xr.Dataset(
+            {
+                "hysteresis_area": (["lat", "lon"], results[0].data),
+                "signed_hysteresis_area": (["lat", "lon"], results[1].data),
+                "normalized_hysteresis_area": (["lat", "lon"], results[2].data),
+                "normalizer_value": (["lat", "lon"], results[3].data)
+            },
+            coords={"lat": da.lat, "lon": da.lon}
+        )
+
+    elif return_interpolated_vectors==True:
+        # Apply function across lat/lon using vectorized approach
+        results = xr.apply_ufunc(
+            hysteresis_wrapper, da,
+            input_core_dims=[["year"]],  # Apply along 'year' axis
+            output_core_dims=[[], [], [], [], ["vec_unit"], ["vec_unit"], ["vec_unit"]],  # Each output is a scalar per lat/lon
+            vectorize=True,  # Automatically loops over lat/lon
+            dask="parallelized",  # Enables parallelization
+            output_dtypes=[float, float, float, float, float, float, float]  # Ensure correct output types
+        )
+        
+        # Ensure results retain (lat, lon) structure
+        dataset = xr.Dataset(
+            {
+                "hysteresis_area": (["lat", "lon"], results[0].data),
+                "signed_hysteresis_area": (["lat", "lon"], results[1].data),
+                "normalized_hysteresis_area": (["lat", "lon"], results[2].data),
+                "normalizer_value": (["lat", "lon"], results[3].data),
+                "interpolated_rampup": (["lat", "lon","vec_unit"], results[4].data),
+                "interpolated_rampdown": (["lat", "lon","vec_unit"], results[5].data),
+                "ramping_vector": (["lat", "lon", "vec_unit"], results[6].data)
+
+            },
+            coords={"lat": da.lat, "lon": da.lon, "vec_unit": np.arange(np.shape(results[6].data)[-1])}
+        )
 
     return dataset

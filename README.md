@@ -24,4 +24,3 @@ from hysteresis import hyst_areas as ha # import the submodule hyst_areas
 
 --- author: Eike E. Köhn
 --- date: Mar 20, 2025
-
