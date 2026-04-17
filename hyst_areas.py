@@ -8,9 +8,10 @@ import numpy as np
 import warnings
 import xarray as xr
 import dask
+from numba import njit
 
 
-def calc_hysteresis_area_1D(ref_axis, data_series, nsteps=1000, normalizer='min_max_diff_full_cycle', return_interpolated_vectors = False):
+def calc_hysteresis_area_1D(ref_axis, data_series, nsteps=1000, normalizer='min_max_diff_full_cycle', return_interpolated_vectors = False, normalize_by_ref_axis_range = False):
     """
     Calculate the hysteresis area between ramp-up and ramp-down curves.
     
@@ -88,14 +89,23 @@ def calc_hysteresis_area_1D(ref_axis, data_series, nsteps=1000, normalizer='min_
         warnings.warn("Normalization factor is zero; normalized hysteresis area will be NaN.", RuntimeWarning)
         normalized_hysteresis_area = np.NaN
 
+    # Normalize normalized hysteresis area with ref_axis range?
+    if normalize_by_ref_axis_range == True:
+        ref_axis_min = min( np.min(rampup_ref_axis), np.min(rampdown_ref_axis))
+        ref_axis_max = max( np.max(rampup_ref_axis), np.max(rampdown_ref_axis))
+        ref_axis_range = np.abs( ref_axis_max - ref_axis_min )
+        normalized_hysteresis_area = normalized_hysteresis_area/ref_axis_range
+        hysteresis_area = hysteresis_area/ref_axis_range
+        #print(f'The ref_axis range is: {ref_axis_range}')
+
     if return_interpolated_vectors == True:
-        return hysteresis_area, signed_hysteresis_area, normalized_hysteresis_area, normalizer_value, interpolated_rampup, interpolated_rampdown, ramping_vector
+        return hysteresis_area, signed_hysteresis_area, normalized_hysteresis_area, normalizer_value, interpolated_rampup, interpolated_rampdown, ramping_vector 
     else:
         return hysteresis_area, signed_hysteresis_area, normalized_hysteresis_area, normalizer_value
 
 
 
-def calc_hysteresis_area_3D(ref_axis, da, nsteps=1000, normalizer='min_max_diff_full_cycle', return_interpolated_vectors=False):
+def calc_hysteresis_area_3D(ref_axis, da, nsteps=1000, normalizer='min_max_diff_full_cycle', return_interpolated_vectors=False, normalize_by_ref_axis_range = False):
     """
     Compute hysteresis at multiple locations in a 3D xarray DataArray.
 
@@ -119,7 +129,8 @@ def calc_hysteresis_area_3D(ref_axis, da, nsteps=1000, normalizer='min_max_diff_
             data_series,
             nsteps=nsteps,
             normalizer=normalizer,
-            return_interpolated_vectors=return_interpolated_vectors
+            return_interpolated_vectors=return_interpolated_vectors,
+            normalize_by_ref_axis_range=normalize_by_ref_axis_range
         )
 
         # Fallback in case of unexpected result structure
@@ -182,3 +193,137 @@ def calc_hysteresis_area_3D(ref_axis, da, nsteps=1000, normalizer='min_max_diff_
         )
 
     return dataset
+
+
+
+
+
+
+
+
+
+
+
+
+@njit
+def interp_numba(x, xp, fp):
+    """
+    Fast 1D linear interpolation (like np.interp) using Numba.
+    Assumes xp is increasing.
+    """
+    result = np.empty(x.shape, dtype=np.float64)
+    for i in range(x.shape[0]):
+        xi = x[i]
+        if xi < xp[0] or xi > xp[-1]:
+            result[i] = np.nan
+        else:
+            for j in range(xp.shape[0] - 1):
+                if xp[j] <= xi <= xp[j + 1]:
+                    x0, x1 = xp[j], xp[j + 1]
+                    y0, y1 = fp[j], fp[j + 1]
+                    result[i] = y0 + (xi - x0) * (y1 - y0) / (x1 - x0)
+                    break
+    return result
+
+
+@njit
+def safe_interp(x, xp, fp):
+    result = np.interp(x, xp, fp)
+    for i in range(len(x)):
+        if x[i] < xp[0] or x[i] > xp[-1]:
+            result[i] = np.nan  # or any default value like -9999
+    return result
+
+# Your Numba-compatible 1D interpolation and hysteresis calculation
+@njit
+def calc_hysteresis_area_1D_numba_norm(ref_axis, data_series, nsteps, normalizer_flag):
+    if np.any(np.isnan(data_series)) or np.any(np.isnan(ref_axis)):
+        return np.NaN, np.NaN, np.NaN, np.NaN
+
+    if nsteps < 20:
+        return np.NaN, np.NaN, np.NaN, np.NaN
+
+    ref_axis_min = np.min(ref_axis)
+    ref_axis_max = np.max(ref_axis)
+    ref_axis_argmax = np.argmax(ref_axis)
+
+    if not np.all(np.diff(ref_axis[:ref_axis_argmax + 1]) > 0) or not np.all(np.diff(ref_axis[ref_axis_argmax:]) < 0):
+        # No warnings in njit mode, so just return NaNs if the axis isn't valid
+        return np.NaN, np.NaN, np.NaN, np.NaN
+
+    ramping_vector = np.linspace(ref_axis_min, ref_axis_max, nsteps)
+    stepwidth = ramping_vector[1] - ramping_vector[0]
+
+    rampup_ref = ref_axis[:ref_axis_argmax + 1]
+    rampup_data = data_series[:ref_axis_argmax + 1]
+
+    rampdown_ref = ref_axis[ref_axis_argmax:][::-1]
+    rampdown_data = data_series[ref_axis_argmax:][::-1]
+
+    if len(rampup_ref) < 2 or len(rampdown_ref) < 2:
+        return np.NaN, np.NaN, np.NaN, np.NaN
+
+    interp_up = safe_interp(ramping_vector, rampup_ref, rampup_data)#, left=np.NaN, right=np.NaN)
+    interp_down = safe_interp(ramping_vector, rampdown_ref, rampdown_data)#, left=np.NaN, right=np.NaN)
+
+    diff = np.abs(interp_up - interp_down)
+    hyst_area = np.nansum(diff * stepwidth)
+    signed_area = np.nanmean(interp_down) - np.nanmean(interp_up)
+
+    if normalizer_flag == 1:  # rampup min-max
+        normalizer_value = np.abs(np.nanmax(interp_up) - np.nanmin(interp_up))
+    elif normalizer_flag == 2:  # full cycle min-max
+        normalizer_value = np.nanmax([np.nanmax(interp_up), np.nanmax(interp_down)]) - np.nanmin([np.nanmin(interp_up), np.nanmin(interp_down)])
+    else:
+        normalizer_value = 0.0
+
+    norm_area = hyst_area / normalizer_value if normalizer_value != 0.0 else np.NaN
+
+    return hyst_area, signed_area, norm_area, normalizer_value
+
+
+
+def calc_hysteresis_area_3D_numba(ref_axis, da, nsteps=1000, normalizer='min_max_diff_full_cycle'):
+    """
+    Apply 1D hysteresis area calculation to 3D xarray DataArray using Numba.
+    """
+    # Convert normalizer string to integer flag
+    normalizer_map = {
+        None: 0,
+        'min_max_diff_rampup': 1,
+        'min_max_diff_full_cycle': 2
+    }
+    normalizer_flag = normalizer_map.get(normalizer, 2)
+
+    # Ensure ref_axis is a NumPy array
+    ref_axis_np = np.asarray(ref_axis)
+
+    def wrapped_numpy(data_series):
+        # Important: make sure data passed to Numba is a NumPy array
+        return calc_hysteresis_area_1D_numba_norm(
+            ref_axis_np,
+            np.asarray(data_series),
+            nsteps,
+            normalizer_flag
+        )
+
+    # Apply across all non-time dims
+    result = xr.apply_ufunc(
+        wrapped_numpy,
+        da,
+        input_core_dims=[["year"]],
+        output_core_dims=[[], [], [], []],
+        vectorize=True,
+        dask="parallelized",
+        output_dtypes=[float, float, float, float]
+    )
+
+    return xr.Dataset(
+        {
+            "hysteresis_area": result[0],
+            "signed_hysteresis_area": result[1],
+            "normalized_hysteresis_area": result[2],
+            "normalizer_value": result[3],
+        },
+        coords={k: v for k, v in da.coords.items() if k != "year"}
+    )
